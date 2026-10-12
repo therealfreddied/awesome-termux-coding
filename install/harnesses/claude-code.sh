@@ -1,8 +1,9 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # ==============================================================================
-# Claude Code 1-Shot Native Termux Installer
+# Claude Code 1-Shot Native Termux Installer (Musl Bionic Architecture)
 # Repository: https://github.com/therealfreddied/awesome-termux-coding
-# Platform: Android / Termux aarch64 (Native Bionic - No PRoot required)
+# Platform: Android / Termux aarch64 (Native Bionic musl - Zero PRoot / glibc)
+# Upstream: Aarstad/claude-code-termux-musl (official Anthropic musl binary)
 # ==============================================================================
 set -euo pipefail
 
@@ -15,7 +16,6 @@ log() { printf "${COLOR_INFO}[INFO]${COLOR_RESET} %s\n" "$*"; }
 ok()  { printf "${COLOR_SUCCESS}[OK]${COLOR_RESET} %s\n" "$*"; }
 warn(){ printf "${COLOR_WARN}[WARN]${COLOR_RESET} %s\n" "$*"; }
 
-# 1. Environment & Architecture Verification
 if [ ! -d "/data/data/com.termux/files/usr" ]; then
   echo "Error: This installer is intended for native execution inside Termux on Android." >&2
   exit 1
@@ -23,11 +23,14 @@ fi
 
 ARCH="$(uname -m)"
 if [ "$ARCH" != "aarch64" ]; then
-  warn "Detected architecture: $ARCH. Most native binaries require aarch64 (arm64)."
+  echo "Error: Claude Code requires aarch64 (64-bit ARM). Detected: $ARCH" >&2
+  exit 1
 fi
 
-# 2. Existing Installation Detection (Repair / Delete / Exit)
-if command -v claude >/dev/null 2>&1 || [ -d "$PREFIX/lib/node_modules/@anthropic-ai/claude-code" ]; then
+BUILD_DIR="$PREFIX/tmp/claude-musl-build"
+
+# 1. Existing Installation Detection (Repair / Delete / Exit)
+if command -v claude >/dev/null 2>&1 || command -v claude-musl >/dev/null 2>&1; then
   echo ""
   warn "Claude Code is already installed on this device!"
   echo "Select an option:"
@@ -53,7 +56,8 @@ if command -v claude >/dev/null 2>&1 || [ -d "$PREFIX/lib/node_modules/@anthropi
     2)
       log "Uninstalling Claude Code..."
       npm uninstall -g @anthropic-ai/claude-code >/dev/null 2>&1 || true
-      rm -f "$PREFIX/bin/claude"
+      rm -f "$PREFIX/bin/claude" "$PREFIX/bin/claude-musl" "$PREFIX/bin/claude-musl-update"
+      rm -rf "$PREFIX/libexec/claude-musl" "$BUILD_DIR"
       ok "Claude Code has been completely removed."
       exit 0
       ;;
@@ -68,40 +72,47 @@ if command -v claude >/dev/null 2>&1 || [ -d "$PREFIX/lib/node_modules/@anthropi
   esac
 fi
 
-# 3. Dependencies
+# 2. Dependencies
 log "Verifying core dependencies..."
 DEPS=""
-command -v node >/dev/null 2>&1 || DEPS="$DEPS nodejs-lts"
-command -v git >/dev/null 2>&1 || DEPS="$DEPS git"
 command -v curl >/dev/null 2>&1 || DEPS="$DEPS curl"
+command -v git >/dev/null 2>&1 || DEPS="$DEPS git"
+command -v tar >/dev/null 2>&1 || DEPS="$DEPS tar"
+command -v gzip >/dev/null 2>&1 || DEPS="$DEPS gzip"
+command -v patchelf >/dev/null 2>&1 || DEPS="$DEPS patchelf"
 
 if [ -n "$DEPS" ]; then
   pkg update -y >/dev/null 2>&1 || true
   pkg install -y $DEPS >/dev/null 2>&1 || pkg install -y $DEPS
 fi
 
-NPM_PREFIX="$(npm config get prefix)"
-if [ "$NPM_PREFIX" != "$PREFIX" ]; then
-  npm config set prefix "$PREFIX"
+# Ensure JS runtime or CC exists for the native DNS proxy
+if ! command -v node >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1 && ! command -v bun >/dev/null 2>&1; then
+  log "Installing nodejs-lts for proxy runtime..."
+  pkg install -y nodejs-lts >/dev/null 2>&1 || pkg install -y nodejs-lts
 fi
 
-# 4. Clean npm install
-log "Installing @anthropic-ai/claude-code natively via npm..."
+# Clean up broken npm global install if present
+npm uninstall -g @anthropic-ai/claude-code >/dev/null 2>&1 || true
 rm -f "$PREFIX/bin/claude"
-npm install -g --omit=dev --no-audit --no-fund --loglevel=error @anthropic-ai/claude-code >/dev/null 2>&1 || \
-npm install -g --omit=dev --no-audit --no-fund @anthropic-ai/claude-code
 
-# 5. Fix Bionic shebangs
-PKG_DIR="$PREFIX/lib/node_modules/@anthropic-ai/claude-code"
-if command -v termux-fix-shebang >/dev/null 2>&1; then
-  if [ -d "$PKG_DIR" ]; then
-    find "$PKG_DIR" -maxdepth 3 -type f -perm /111 -exec termux-fix-shebang {} + 2>/dev/null || true
-  fi
-  termux-fix-shebang "$PREFIX/bin/claude" 2>/dev/null || true
+# 3. Fetch Aarstad musl engine
+log "Fetching Aarstad musl Bionic installer..."
+mkdir -p "$BUILD_DIR"
+if [ -d "$BUILD_DIR/.git" ]; then
+  git -C "$BUILD_DIR" pull --ff-only >/dev/null 2>&1 || true
+else
+  rm -rf "$BUILD_DIR"
+  git clone --depth 1 https://github.com/Aarstad/claude-code-termux-musl.git "$BUILD_DIR" >/dev/null 2>&1
 fi
 
-# 6. Verification
-if command -v claude >/dev/null 2>&1; then
+# 4. Run installer with promotion to 'claude'
+log "Installing official Anthropic musl binary (~723KB musl loader)..."
+cd "$BUILD_DIR"
+bash ./install.sh --promote >/dev/null 2>&1 || bash ./install.sh --promote
+
+# 5. Verification
+if command -v claude >/dev/null 2>&1 || command -v claude-musl >/dev/null 2>&1; then
   ok "Claude Code installed and verified!"
   echo ""
   echo "--------------------------------------------------------"
@@ -109,7 +120,10 @@ if command -v claude >/dev/null 2>&1; then
   echo "  claude"
   echo ""
   echo "Installed version:"
-  claude --version 2>/dev/null || true
+  claude --version 2>/dev/null || claude-musl --version 2>/dev/null || true
+  echo ""
+  echo "To update anytime:"
+  echo "  claude-musl-update"
   echo "--------------------------------------------------------"
 else
   warn "claude binary was not found in PATH ($PREFIX/bin)."
