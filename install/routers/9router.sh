@@ -90,9 +90,15 @@ Module._load = function(request, parent, isMain) {
 EOF
 
 # 3. Clean-install 9router globally via npm
-# If previously corrupted, remove and reinstall cleanly
+# Suppress npm 11+ install-scripts warnings and noisy postinstall output
 log "Installing 9router globally via npm..."
 rm -f "$PREFIX/bin/9router"
+ALLOW_FLAG=""
+if npm install --help 2>&1 | grep -q -- "--allow-scripts"; then
+  ALLOW_FLAG="--allow-scripts=9router"
+fi
+npm install -g --omit=dev --no-audit --no-fund --loglevel=error $ALLOW_FLAG 9router >/dev/null 2>&1 || \
+npm install -g --omit=dev --no-audit --no-fund --loglevel=error 9router >/dev/null 2>&1 || \
 npm install -g --omit=dev --no-audit --no-fund 9router
 
 # 4. Patch Bionic shebangs in global package
