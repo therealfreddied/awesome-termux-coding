@@ -113,7 +113,7 @@ fi
 log "Extracting to $DEST_DIR..."
 rm -rf "$DEST_DIR"
 mkdir -p "$DEST_DIR"
-tar -xzf "$TGZ" -C "$DEST_DIR"
+tar -xzf "$TGZ" -C "$DEST_DIR" --strip-components=1
 rm -rf "$WORK"
 
 # 5. Ripgrep platform shim
