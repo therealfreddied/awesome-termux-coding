@@ -118,6 +118,7 @@ log "Building native C PTY filter for Termux soft keyboard tap-to-focus..."
 mkdir -p "$LIBEXEC"
 cat <<'EOF' > "$LIBEXEC/termux-pty-filter.c"
 #include <pty.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <termios.h>
 #include <signal.h>
