@@ -20,10 +20,10 @@ if [ ! -d "/data/data/com.termux/files/usr" ]; then
   exit 1
 fi
 
-PKG="@gitlawb/openclaude"
+PKG="@twigpine/openclaude"
 
 # 1. Existing Installation Detection (Repair / Delete / Exit)
-if command -v openclaude >/dev/null 2>&1 || [ -d "$PREFIX/lib/node_modules/$PKG" ]; then
+if command -v openclaude >/dev/null 2>&1 || [ -d "$PREFIX/lib/node_modules/$PKG" ] || [ -d "$PREFIX/lib/node_modules/@gitlawb/openclaude" ]; then
   echo ""
   warn "OpenClaude is already installed on this device!"
   echo "Select an option:"
@@ -48,7 +48,7 @@ if command -v openclaude >/dev/null 2>&1 || [ -d "$PREFIX/lib/node_modules/$PKG"
       ;;
     2)
       log "Uninstalling OpenClaude..."
-      npm uninstall -g "$PKG" >/dev/null 2>&1 || true
+      npm uninstall -g "$PKG" @gitlawb/openclaude >/dev/null 2>&1 || true
       rm -f "$PREFIX/bin/openclaude"
       ok "OpenClaude has been completely removed."
       exit 0
@@ -63,6 +63,9 @@ if command -v openclaude >/dev/null 2>&1 || [ -d "$PREFIX/lib/node_modules/$PKG"
       ;;
   esac
 fi
+
+# Clean up legacy @gitlawb scope if present
+npm uninstall -g @gitlawb/openclaude >/dev/null 2>&1 || true
 
 # 2. Dependencies
 log "Verifying core dependencies..."
