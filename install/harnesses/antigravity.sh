@@ -2,7 +2,8 @@
 # ==============================================================================
 # Google Antigravity CLI (agy) 1-Shot Native Termux Installer
 # Repository: https://github.com/therealfreddied/awesome-termux-coding
-# Platform: Android / Termux aarch64 (Native Bionic - No PRoot required)
+# Platform: Android / Termux aarch64 (Native Bionic - VA39 Patched Standalone Port)
+# Upstream: wallentx/antigravity-cli-termux (hjotha & Brajesh2022 binary patches)
 # ==============================================================================
 set -euo pipefail
 
@@ -20,10 +21,17 @@ if [ ! -d "/data/data/com.termux/files/usr" ]; then
   exit 1
 fi
 
-PKG="@kelvinzero/antigravity-cli"
+ARCH="$(uname -m)"
+if [ "$ARCH" != "aarch64" ]; then
+  echo "Error: Antigravity CLI requires aarch64 (64-bit ARM). Detected: $ARCH" >&2
+  exit 1
+fi
+
+# Clean up broken npm wrapper if previously installed
+npm uninstall -g @kelvinzero/antigravity-cli >/dev/null 2>&1 || true
 
 # 1. Existing Installation Detection (Repair / Delete / Exit)
-if command -v antigravity >/dev/null 2>&1 || command -v agy >/dev/null 2>&1 || [ -d "$PREFIX/lib/node_modules/$PKG" ]; then
+if command -v agy >/dev/null 2>&1 || [ -f "$PREFIX/bin/agy" ]; then
   echo ""
   warn "Antigravity CLI (agy) is already installed on this device!"
   echo "Select an option:"
@@ -48,8 +56,7 @@ if command -v antigravity >/dev/null 2>&1 || command -v agy >/dev/null 2>&1 || [
       ;;
     2)
       log "Uninstalling Antigravity CLI..."
-      npm uninstall -g "$PKG" >/dev/null 2>&1 || true
-      rm -f "$PREFIX/bin/antigravity" "$PREFIX/bin/antigravity-cli" "$PREFIX/bin/agy"
+      rm -f "$PREFIX/bin/agy" "$PREFIX/bin/agy.va39" "$PREFIX/bin/antigravity"
       ok "Antigravity CLI has been completely removed."
       exit 0
       ;;
@@ -67,49 +74,55 @@ fi
 # 2. Dependencies
 log "Verifying core dependencies..."
 DEPS=""
-command -v node >/dev/null 2>&1 || DEPS="$DEPS nodejs-lts"
-command -v git >/dev/null 2>&1 || DEPS="$DEPS git"
 command -v curl >/dev/null 2>&1 || DEPS="$DEPS curl"
+command -v tar >/dev/null 2>&1 || DEPS="$DEPS tar"
+command -v gzip >/dev/null 2>&1 || DEPS="$DEPS gzip"
 
 if [ -n "$DEPS" ]; then
   pkg update -y >/dev/null 2>&1 || true
   pkg install -y $DEPS >/dev/null 2>&1 || pkg install -y $DEPS
 fi
 
-NPM_PREFIX="$(npm config get prefix)"
-if [ "$NPM_PREFIX" != "$PREFIX" ]; then
-  npm config set prefix "$PREFIX"
+# 3. Download & Install Standalone VA39-Patched Native Port
+URL="https://github.com/wallentx/antigravity-cli-termux/releases/latest/download/antigravity-termux-standalone.tar.gz"
+TMP_DIR="$PREFIX/tmp/.agy-install"
+mkdir -p "$TMP_DIR"
+
+log "Downloading official standalone Termux port (VA39 TCMalloc patched)..."
+curl -fsSL -L "$URL" -o "$TMP_DIR/agy-standalone.tar.gz"
+
+log "Extracting binaries into $PREFIX/bin..."
+tar -xzf "$TMP_DIR/agy-standalone.tar.gz" -C "$TMP_DIR"
+
+# Install both agy and the kernel VA39 fallback
+if [ -f "$TMP_DIR/bin/agy" ]; then
+  install -m 755 "$TMP_DIR/bin/agy" "$PREFIX/bin/agy"
+elif [ -f "$TMP_DIR/agy" ]; then
+  install -m 755 "$TMP_DIR/agy" "$PREFIX/bin/agy"
 fi
 
-# 3. Clean npm install
-log "Installing $PKG natively via npm..."
-rm -f "$PREFIX/bin/antigravity" "$PREFIX/bin/antigravity-cli" "$PREFIX/bin/agy"
-npm install -g --omit=dev --no-audit --no-fund --loglevel=error "$PKG" >/dev/null 2>&1 || \
-npm install -g --omit=dev --no-audit --no-fund "$PKG"
-
-# 4. Patch Bionic shebangs
-PKG_DIR="$PREFIX/lib/node_modules/$PKG"
-if command -v termux-fix-shebang >/dev/null 2>&1; then
-  if [ -d "$PKG_DIR/dist" ]; then
-    find "$PKG_DIR" -maxdepth 3 -type f -perm /111 -exec termux-fix-shebang {} + 2>/dev/null || true
-  fi
-  termux-fix-shebang "$PREFIX/bin/antigravity" 2>/dev/null || true
-  termux-fix-shebang "$PREFIX/bin/antigravity-cli" 2>/dev/null || true
+if [ -f "$TMP_DIR/bin/agy.va39" ]; then
+  install -m 755 "$TMP_DIR/bin/agy.va39" "$PREFIX/bin/agy.va39"
+elif [ -f "$TMP_DIR/agy.va39" ]; then
+  install -m 755 "$TMP_DIR/agy.va39" "$PREFIX/bin/agy.va39"
 fi
 
-# Create 'agy' alias
-ln -sf "$PREFIX/bin/antigravity" "$PREFIX/bin/agy"
+# Alias 'antigravity' to 'agy'
+ln -sf "$PREFIX/bin/agy" "$PREFIX/bin/antigravity"
 
-# 5. Verification
-if command -v antigravity >/dev/null 2>&1 || command -v agy >/dev/null 2>&1; then
+rm -rf "$TMP_DIR"
+
+# 4. Verification
+if command -v agy >/dev/null 2>&1; then
   ok "Antigravity CLI (agy) installed and verified!"
   echo ""
   echo "--------------------------------------------------------"
   echo "Run Antigravity with:"
   echo "  agy"
-  echo "  or"
-  echo "  antigravity"
+  echo ""
+  echo "Installed version:"
+  agy --version 2>/dev/null || true
   echo "--------------------------------------------------------"
 else
-  warn "antigravity binary not found in PATH ($PREFIX/bin)."
+  warn "agy binary not found in PATH ($PREFIX/bin)."
 fi
