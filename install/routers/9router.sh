@@ -3,8 +3,6 @@
 # 9router 1-Shot Native Termux Installer (Self-Updating Architecture)
 # Repository: https://github.com/therealfreddied/awesome-termux-coding
 # Platform: Android / Termux aarch64 (Native Bionic - No PRoot required)
-# Purpose: Ultra-lightweight AI proxy router with permanent Termux compatibility
-#          allowing seamless upstream updates via built-in updater or npm.
 # ==============================================================================
 set -euo pipefail
 
@@ -38,12 +36,12 @@ if [ "$NPM_PREFIX" != "$PREFIX" ]; then
   npm config set prefix "$PREFIX"
 fi
 
-# 1. Ensure permanent persistent directory and persistent machine-id
+# 1. Ensure persistent ~/.9router directory and valid machine-id
 ROUTER_HOME="$HOME/.9router"
 mkdir -p "$ROUTER_HOME"
 
 if [ ! -f "$ROUTER_HOME/machine-id" ]; then
-  log "Generating persistent Android Bionic machine-id..."
+  log "Generating persistent Android machine-id..."
   if [ -r /proc/sys/kernel/random/boot_id ]; then
     cat /proc/sys/kernel/random/boot_id > "$ROUTER_HOME/machine-id"
   else
@@ -53,11 +51,8 @@ if [ ! -f "$ROUTER_HOME/machine-id" ]; then
 fi
 
 # 2. Deploy permanent Node.js runtime preload shim
-# This shim lives OUTSIDE npm's node_modules in ~/.9router/termux-preload.js.
-# Whenever 9router starts (or updates), Node loads this shim first via NODE_OPTIONS="-r ...",
-# transparently intercepting "node-machine-id" and bridging Android Bionic.
-# Upstream updates will NEVER wipe or invalidate this fix!
-log "Installing permanent runtime preload shim at $ROUTER_HOME/termux-preload.js..."
+# This shim intercepts 'node-machine-id' at require-time so it never fails on Android.
+log "Installing runtime preload shim at $ROUTER_HOME/termux-preload.js..."
 cat <<'EOF' > "$ROUTER_HOME/termux-preload.js"
 const Module = require('module');
 const fs = require('fs');
@@ -94,11 +89,13 @@ Module._load = function(request, parent, isMain) {
 };
 EOF
 
-# 3. Install 9router globally via standard npm
+# 3. Clean-install 9router globally via npm
+# If previously corrupted, remove and reinstall cleanly
 log "Installing 9router globally via npm..."
+rm -f "$PREFIX/bin/9router"
 npm install -g --omit=dev --no-audit --no-fund 9router
 
-# 4. Patch Bionic shebangs in global install
+# 4. Patch Bionic shebangs in global package
 PKG_DIR="$PREFIX/lib/node_modules/9router"
 if command -v termux-fix-shebang >/dev/null 2>&1; then
   if [ -d "$PKG_DIR" ]; then
@@ -106,10 +103,9 @@ if command -v termux-fix-shebang >/dev/null 2>&1; then
   fi
 fi
 
-# 5. Create persistent wrapper at $PREFIX/bin/9router
-# Injects NODE_OPTIONS="-r $ROUTER_HOME/termux-preload.js" so all runs and sub-processes
-# inherit the Android Bionic compatibility layer.
+# 5. Create launcher wrapper (CRITICAL: unlink first so we do NOT clobber cli.js!)
 log "Configuring launcher wrapper at $PREFIX/bin/9router..."
+rm -f "$PREFIX/bin/9router"
 cat <<'EOF' > "$PREFIX/bin/9router"
 #!/data/data/com.termux/files/usr/bin/bash
 PRELOAD="$HOME/.9router/termux-preload.js"
@@ -123,7 +119,6 @@ CLI_PATH="$PREFIX/lib/node_modules/9router/cli.js"
 if [ -f "$CLI_PATH" ]; then
   exec node "$CLI_PATH" "$@"
 else
-  # Fallback in case npm linked directly
   exec npx 9router "$@"
 fi
 EOF
@@ -132,7 +127,7 @@ termux-fix-shebang "$PREFIX/bin/9router" 2>/dev/null || true
 
 # 6. Verification
 if command -v 9router >/dev/null 2>&1; then
-  ok "9router installed with Self-Updating Architecture!"
+  ok "9router installed and verified!"
   echo ""
   echo "--------------------------------------------------------"
   echo "Run 9router with:"
@@ -142,10 +137,7 @@ if command -v 9router >/dev/null 2>&1; then
   9router --version 2>/dev/null || true
   echo ""
   echo "Self-Updating Guarantee:"
-  echo "  You can safely update 9router anytime using:"
-  echo "  - In-app Web UI / terminal update button"
-  echo "  - Or manually: npm i -g 9router@latest"
-  echo "  The Termux compatibility layer is isolated and persists across updates!"
+  echo "  You can safely update 9router anytime via Web UI or npm."
   echo "--------------------------------------------------------"
 else
   warn "9router binary not found on PATH ($PREFIX/bin)."
