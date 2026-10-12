@@ -3,8 +3,6 @@
 # Claude Code Router (musistudio) 1-Shot Native Termux Installer
 # Repository: https://github.com/therealfreddied/awesome-termux-coding
 # Platform: Android / Termux aarch64 (Native Bionic - No PRoot required)
-# Upstream: musistudio/claude-code-router (@musistudio/claude-code-router)
-# Purpose: Route Claude Code to ANY model (DeepSeek, Gemini, OpenRouter, Ollama)
 # ==============================================================================
 set -euo pipefail
 
@@ -22,6 +20,51 @@ if [ ! -d "/data/data/com.termux/files/usr" ]; then
   exit 1
 fi
 
+PKG="@musistudio/claude-code-router"
+
+# 1. Existing Installation Detection (Repair / Delete / Exit)
+if command -v ccr >/dev/null 2>&1 || [ -d "$PREFIX/lib/node_modules/$PKG" ]; then
+  echo ""
+  warn "Claude Code Router is already installed on this device!"
+  echo "Select an option:"
+  echo "  1) Repair / Reinstall"
+  echo "  2) Delete / Uninstall"
+  echo "  3) Exit"
+  echo ""
+
+  CHOICE=""
+  if [ -t 0 ]; then
+    read -rp "Enter choice [1-3] (default: 1): " CHOICE
+  elif [ -e /dev/tty ]; then
+    read -rp "Enter choice [1-3] (default: 1): " CHOICE < /dev/tty || CHOICE="1"
+  else
+    CHOICE="1"
+  fi
+  CHOICE="${CHOICE:-1}"
+
+  case "$CHOICE" in
+    1)
+      log "Proceeding with repair / update..."
+      ;;
+    2)
+      log "Uninstalling Claude Code Router..."
+      npm uninstall -g "$PKG" >/dev/null 2>&1 || true
+      rm -f "$PREFIX/bin/ccr" "$PREFIX/bin/claude-router"
+      ok "Claude Code Router has been completely removed."
+      exit 0
+      ;;
+    3)
+      log "Exiting without making changes."
+      exit 0
+      ;;
+    *)
+      warn "Invalid choice. Exiting."
+      exit 1
+      ;;
+  esac
+fi
+
+# 2. Dependencies
 log "Verifying core dependencies..."
 DEPS=""
 command -v node >/dev/null 2>&1 || DEPS="$DEPS nodejs-lts"
@@ -29,9 +72,8 @@ command -v git >/dev/null 2>&1 || DEPS="$DEPS git"
 command -v curl >/dev/null 2>&1 || DEPS="$DEPS curl"
 
 if [ -n "$DEPS" ]; then
-  log "Installing missing packages:$DEPS..."
   pkg update -y >/dev/null 2>&1 || true
-  pkg install -y $DEPS
+  pkg install -y $DEPS >/dev/null 2>&1 || pkg install -y $DEPS
 fi
 
 NPM_PREFIX="$(npm config get prefix)"
@@ -39,11 +81,14 @@ if [ "$NPM_PREFIX" != "$PREFIX" ]; then
   npm config set prefix "$PREFIX"
 fi
 
-PKG="@musistudio/claude-code-router"
+# 3. Clean npm install
 log "Installing $PKG globally via npm..."
+rm -f "$PREFIX/bin/ccr" "$PREFIX/bin/claude-router"
+npm install -g --omit=dev --no-audit --no-fund --loglevel=error "$PKG" >/dev/null 2>&1 || \
 npm install -g --omit=dev --no-audit --no-fund "$PKG"
 
-PKG_DIR="$PREFIX/lib/node_modules/@musistudio/claude-code-router"
+# 4. Patch Bionic shebangs
+PKG_DIR="$PREFIX/lib/node_modules/$PKG"
 if command -v termux-fix-shebang >/dev/null 2>&1; then
   if [ -d "$PKG_DIR/dist" ]; then
     find "$PKG_DIR" -maxdepth 3 -type f -perm /111 -exec termux-fix-shebang {} + 2>/dev/null || true
@@ -51,25 +96,24 @@ if command -v termux-fix-shebang >/dev/null 2>&1; then
   termux-fix-shebang "$PREFIX/bin/ccr" 2>/dev/null || true
 fi
 
-# Create convenient launcher script
+# Launcher alias
+rm -f "$PREFIX/bin/claude-router"
 cat <<'EOF' > "$PREFIX/bin/claude-router"
 #!/data/data/com.termux/files/usr/bin/bash
 exec ccr "$@"
 EOF
-chmod +x "$PREFIX/bin/claude-router"
+chmod 755 "$PREFIX/bin/claude-router"
+termux-fix-shebang "$PREFIX/bin/claude-router" 2>/dev/null || true
 
+# 5. Verification
 if command -v ccr >/dev/null 2>&1; then
-  ok "Claude Code Router installed successfully!"
+  ok "Claude Code Router installed and verified!"
   echo ""
   echo "--------------------------------------------------------"
-  echo "Commands available:"
+  echo "Commands:"
   echo "  ccr           (or 'claude-router')"
-  echo "  ccr start     (launch the local routing daemon)"
-  echo "  ccr ui        (open the mobile web config dashboard)"
-  echo ""
-  echo "To connect Claude Code to this router:"
-  echo "  export ANTHROPIC_BASE_URL=\"http://127.0.0.1:3456\""
-  echo "  claude"
+  echo "  ccr start     (launch local daemon)"
+  echo "  ccr ui        (web dashboard)"
   echo "--------------------------------------------------------"
 else
   warn "ccr binary not found in PATH ($PREFIX/bin)."

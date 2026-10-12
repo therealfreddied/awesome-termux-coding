@@ -3,9 +3,6 @@
 # OpenCodex 1-Shot Native Termux Installer
 # Repository: https://github.com/therealfreddied/awesome-termux-coding
 # Platform: Android / Termux aarch64 (Native Bionic - No PRoot required)
-# Upstream: lidge-jun/opencodex (published as @bitkyc08/opencodex)
-# Purpose: Universal provider proxy for OpenAI Codex CLI (use Claude, Gemini,
-#          DeepSeek, Ollama, OpenRouter with Codex)
 # ==============================================================================
 set -euo pipefail
 
@@ -23,6 +20,51 @@ if [ ! -d "/data/data/com.termux/files/usr" ]; then
   exit 1
 fi
 
+PKG="@bitkyc08/opencodex"
+
+# 1. Existing Installation Detection (Repair / Delete / Exit)
+if command -v ocx >/dev/null 2>&1 || command -v opencodex >/dev/null 2>&1 || [ -d "$PREFIX/lib/node_modules/$PKG" ]; then
+  echo ""
+  warn "OpenCodex is already installed on this device!"
+  echo "Select an option:"
+  echo "  1) Repair / Reinstall"
+  echo "  2) Delete / Uninstall"
+  echo "  3) Exit"
+  echo ""
+
+  CHOICE=""
+  if [ -t 0 ]; then
+    read -rp "Enter choice [1-3] (default: 1): " CHOICE
+  elif [ -e /dev/tty ]; then
+    read -rp "Enter choice [1-3] (default: 1): " CHOICE < /dev/tty || CHOICE="1"
+  else
+    CHOICE="1"
+  fi
+  CHOICE="${CHOICE:-1}"
+
+  case "$CHOICE" in
+    1)
+      log "Proceeding with repair / update..."
+      ;;
+    2)
+      log "Uninstalling OpenCodex..."
+      npm uninstall -g "$PKG" >/dev/null 2>&1 || true
+      rm -f "$PREFIX/bin/ocx" "$PREFIX/bin/opencodex"
+      ok "OpenCodex has been completely removed."
+      exit 0
+      ;;
+    3)
+      log "Exiting without making changes."
+      exit 0
+      ;;
+    *)
+      warn "Invalid choice. Exiting."
+      exit 1
+      ;;
+  esac
+fi
+
+# 2. Dependencies
 log "Verifying core dependencies..."
 DEPS=""
 command -v node >/dev/null 2>&1 || DEPS="$DEPS nodejs-lts"
@@ -30,9 +72,8 @@ command -v git >/dev/null 2>&1 || DEPS="$DEPS git"
 command -v curl >/dev/null 2>&1 || DEPS="$DEPS curl"
 
 if [ -n "$DEPS" ]; then
-  log "Installing missing packages:$DEPS..."
   pkg update -y >/dev/null 2>&1 || true
-  pkg install -y $DEPS
+  pkg install -y $DEPS >/dev/null 2>&1 || pkg install -y $DEPS
 fi
 
 NPM_PREFIX="$(npm config get prefix)"
@@ -40,11 +81,14 @@ if [ "$NPM_PREFIX" != "$PREFIX" ]; then
   npm config set prefix "$PREFIX"
 fi
 
-PKG="@bitkyc08/opencodex"
+# 3. Clean npm install
 log "Installing $PKG natively via npm..."
+rm -f "$PREFIX/bin/ocx" "$PREFIX/bin/opencodex"
+npm install -g --omit=dev --no-audit --no-fund --loglevel=error "$PKG" >/dev/null 2>&1 || \
 npm install -g --omit=dev --no-audit --no-fund "$PKG"
 
-PKG_DIR="$PREFIX/lib/node_modules/@bitkyc08/opencodex"
+# 4. Patch Bionic shebangs
+PKG_DIR="$PREFIX/lib/node_modules/$PKG"
 if command -v termux-fix-shebang >/dev/null 2>&1; then
   if [ -d "$PKG_DIR/bin" ]; then
     find "$PKG_DIR/bin" -maxdepth 2 -type f -perm /111 -exec termux-fix-shebang {} + 2>/dev/null || true
@@ -53,15 +97,14 @@ if command -v termux-fix-shebang >/dev/null 2>&1; then
   termux-fix-shebang "$PREFIX/bin/opencodex" 2>/dev/null || true
 fi
 
+# 5. Verification
 if command -v ocx >/dev/null 2>&1 || command -v opencodex >/dev/null 2>&1; then
-  ok "OpenCodex installed successfully!"
+  ok "OpenCodex installed and verified!"
   echo ""
   echo "--------------------------------------------------------"
-  echo "Commands available:"
+  echo "Commands:"
   echo "  ocx           (or 'opencodex')"
-  echo "  ocx --help    (view provider configuration options)"
-  echo ""
-  echo "Bridge any model (Claude, DeepSeek, Ollama) into Codex CLI!"
+  echo "  ocx --help"
   echo "--------------------------------------------------------"
 else
   warn "ocx binary not found in PATH ($PREFIX/bin)."

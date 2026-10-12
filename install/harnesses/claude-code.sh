@@ -26,7 +26,49 @@ if [ "$ARCH" != "aarch64" ]; then
   warn "Detected architecture: $ARCH. Most native binaries require aarch64 (arm64)."
 fi
 
-# 2. Dependencies
+# 2. Existing Installation Detection (Repair / Delete / Exit)
+if command -v claude >/dev/null 2>&1 || [ -d "$PREFIX/lib/node_modules/@anthropic-ai/claude-code" ]; then
+  echo ""
+  warn "Claude Code is already installed on this device!"
+  echo "Select an option:"
+  echo "  1) Repair / Reinstall"
+  echo "  2) Delete / Uninstall"
+  echo "  3) Exit"
+  echo ""
+
+  CHOICE=""
+  if [ -t 0 ]; then
+    read -rp "Enter choice [1-3] (default: 1): " CHOICE
+  elif [ -e /dev/tty ]; then
+    read -rp "Enter choice [1-3] (default: 1): " CHOICE < /dev/tty || CHOICE="1"
+  else
+    CHOICE="1"
+  fi
+  CHOICE="${CHOICE:-1}"
+
+  case "$CHOICE" in
+    1)
+      log "Proceeding with repair / update..."
+      ;;
+    2)
+      log "Uninstalling Claude Code..."
+      npm uninstall -g @anthropic-ai/claude-code >/dev/null 2>&1 || true
+      rm -f "$PREFIX/bin/claude"
+      ok "Claude Code has been completely removed."
+      exit 0
+      ;;
+    3)
+      log "Exiting without making changes."
+      exit 0
+      ;;
+    *)
+      warn "Invalid choice. Exiting."
+      exit 1
+      ;;
+  esac
+fi
+
+# 3. Dependencies
 log "Verifying core dependencies..."
 DEPS=""
 command -v node >/dev/null 2>&1 || DEPS="$DEPS nodejs-lts"
@@ -34,24 +76,22 @@ command -v git >/dev/null 2>&1 || DEPS="$DEPS git"
 command -v curl >/dev/null 2>&1 || DEPS="$DEPS curl"
 
 if [ -n "$DEPS" ]; then
-  log "Installing missing packages:$DEPS..."
   pkg update -y >/dev/null 2>&1 || true
-  pkg install -y $DEPS
+  pkg install -y $DEPS >/dev/null 2>&1 || pkg install -y $DEPS
 fi
 
-# 3. Global npm prefix verification
 NPM_PREFIX="$(npm config get prefix)"
 if [ "$NPM_PREFIX" != "$PREFIX" ]; then
-  log "Setting npm prefix to $PREFIX..."
   npm config set prefix "$PREFIX"
 fi
 
-# 4. Install official Claude Code CLI
+# 4. Clean npm install
 log "Installing @anthropic-ai/claude-code natively via npm..."
+rm -f "$PREFIX/bin/claude"
+npm install -g --omit=dev --no-audit --no-fund --loglevel=error @anthropic-ai/claude-code >/dev/null 2>&1 || \
 npm install -g --omit=dev --no-audit --no-fund @anthropic-ai/claude-code
 
 # 5. Fix Bionic shebangs
-log "Patching Bionic shebangs..."
 PKG_DIR="$PREFIX/lib/node_modules/@anthropic-ai/claude-code"
 if command -v termux-fix-shebang >/dev/null 2>&1; then
   if [ -d "$PKG_DIR" ]; then
@@ -62,16 +102,15 @@ fi
 
 # 6. Verification
 if command -v claude >/dev/null 2>&1; then
-  ok "Claude Code installed successfully!"
+  ok "Claude Code installed and verified!"
   echo ""
   echo "--------------------------------------------------------"
   echo "Run Claude Code with:"
   echo "  claude"
   echo ""
-  echo "To use custom endpoints (OpenRouter, DeepSeek, Local Proxy):"
-  echo "  export ANTHROPIC_BASE_URL=\"http://127.0.0.1:3456\""
-  echo "  export ANTHROPIC_API_KEY=\"your_key_here\""
+  echo "Installed version:"
+  claude --version 2>/dev/null || true
   echo "--------------------------------------------------------"
 else
-  warn "claude binary was not found in PATH ($PREFIX/bin). Ensure $PREFIX/bin is in your PATH."
+  warn "claude binary was not found in PATH ($PREFIX/bin)."
 fi

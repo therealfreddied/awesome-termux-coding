@@ -20,6 +20,52 @@ if [ ! -d "/data/data/com.termux/files/usr" ]; then
   exit 1
 fi
 
+DEST_DIR="$PREFIX/opt/dsh"
+
+# 1. Existing Installation Detection (Repair / Delete / Exit)
+if command -v dsh >/dev/null 2>&1 || [ -d "$DEST_DIR" ]; then
+  echo ""
+  warn "DeepSeek Harness (dsh) is already installed on this device!"
+  echo "Select an option:"
+  echo "  1) Repair / Reinstall"
+  echo "  2) Delete / Uninstall"
+  echo "  3) Exit"
+  echo ""
+
+  CHOICE=""
+  if [ -t 0 ]; then
+    read -rp "Enter choice [1-3] (default: 1): " CHOICE
+  elif [ -e /dev/tty ]; then
+    read -rp "Enter choice [1-3] (default: 1): " CHOICE < /dev/tty || CHOICE="1"
+  else
+    CHOICE="1"
+  fi
+  CHOICE="${CHOICE:-1}"
+
+  case "$CHOICE" in
+    1)
+      log "Proceeding with repair / update..."
+      ;;
+    2)
+      log "Uninstalling DeepSeek Harness..."
+      npm uninstall -g @deepseek-ai/dsh >/dev/null 2>&1 || true
+      rm -f "$PREFIX/bin/dsh"
+      rm -rf "$DEST_DIR"
+      ok "DeepSeek Harness has been completely removed."
+      exit 0
+      ;;
+    3)
+      log "Exiting without making changes."
+      exit 0
+      ;;
+    *)
+      warn "Invalid choice. Exiting."
+      exit 1
+      ;;
+  esac
+fi
+
+# 2. Dependencies
 log "Verifying core dependencies..."
 DEPS=""
 command -v node >/dev/null 2>&1 || DEPS="$DEPS nodejs-lts"
@@ -29,11 +75,10 @@ command -v tar >/dev/null 2>&1 || DEPS="$DEPS tar"
 
 if [ -n "$DEPS" ]; then
   pkg update -y >/dev/null 2>&1 || true
-  pkg install -y $DEPS
+  pkg install -y $DEPS >/dev/null 2>&1 || pkg install -y $DEPS
 fi
 
 TMP_DIR="$PREFIX/tmp/dsh-install"
-DEST_DIR="$PREFIX/opt/dsh"
 mkdir -p "$TMP_DIR" "$DEST_DIR"
 
 log "Fetching native DeepSeek Harness Termux build..."
@@ -43,10 +88,9 @@ if curl -fsSL -I "$RELEASE_URL" >/dev/null 2>&1; then
   curl -fsSL -L "$RELEASE_URL" -o "$TMP_DIR/dsh.tar.gz"
   tar -xzf "$TMP_DIR/dsh.tar.gz" -C "$DEST_DIR"
 else
-  log "Installing @deepseek-ai/dsh via npm with native shims..."
-  npm install -g --omit=dev --no-audit --no-fund @deepseek-ai/dsh || {
-    npm install -g --omit=dev --no-audit --no-fund deepseek-ai
-  }
+  log "Installing @deepseek-ai/dsh via npm..."
+  npm install -g --omit=dev --no-audit --no-fund --loglevel=error @deepseek-ai/dsh >/dev/null 2>&1 || \
+  npm install -g --omit=dev --no-audit --no-fund @deepseek-ai/dsh
 fi
 
 if command -v termux-fix-shebang >/dev/null 2>&1; then
@@ -55,15 +99,13 @@ fi
 
 rm -rf "$TMP_DIR"
 
+# 3. Verification
 if command -v dsh >/dev/null 2>&1; then
-  ok "DeepSeek Harness installed successfully!"
+  ok "DeepSeek Harness installed and verified!"
   echo ""
   echo "--------------------------------------------------------"
   echo "Run DeepSeek Harness with:"
   echo "  dsh"
-  echo ""
-  echo "Configure your DeepSeek API key:"
-  echo "  export DEEPSEEK_API_KEY=\"sk-...\""
   echo "--------------------------------------------------------"
 else
   warn "dsh binary not found in PATH ($PREFIX/bin)."

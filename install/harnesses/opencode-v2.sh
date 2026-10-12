@@ -3,7 +3,6 @@
 # OpenCode v2.x (Modern Edition) 1-Shot Native Termux Installer
 # Repository: https://github.com/therealfreddied/awesome-termux-coding
 # Platform: Android / Termux aarch64 (Native Bionic - No PRoot required)
-# Upstream: guysoft/opencode-termux (v2.x engine - runs side-by-side with v1)
 # ==============================================================================
 set -euo pipefail
 
@@ -27,6 +26,50 @@ if [ "$ARCH" != "aarch64" ]; then
   exit 1
 fi
 
+# 1. Existing Installation Detection (Repair / Delete / Exit)
+if command -v opencode2 >/dev/null 2>&1; then
+  echo ""
+  warn "OpenCode v2.x is already installed on this device!"
+  echo "Select an option:"
+  echo "  1) Repair / Reinstall"
+  echo "  2) Delete / Uninstall"
+  echo "  3) Exit"
+  echo ""
+
+  CHOICE=""
+  if [ -t 0 ]; then
+    read -rp "Enter choice [1-3] (default: 1): " CHOICE
+  elif [ -e /dev/tty ]; then
+    read -rp "Enter choice [1-3] (default: 1): " CHOICE < /dev/tty || CHOICE="1"
+  else
+    CHOICE="1"
+  fi
+  CHOICE="${CHOICE:-1}"
+
+  case "$CHOICE" in
+    1)
+      log "Proceeding with repair / update..."
+      ;;
+    2)
+      log "Uninstalling OpenCode v2.x..."
+      dpkg -r opencode2 >/dev/null 2>&1 || true
+      rm -f "$PREFIX/bin/opencode2"
+      rm -rf "$PREFIX/libexec/opencode2"
+      ok "OpenCode v2.x has been completely removed."
+      exit 0
+      ;;
+    3)
+      log "Exiting without making changes."
+      exit 0
+      ;;
+    *)
+      warn "Invalid choice. Exiting."
+      exit 1
+      ;;
+  esac
+fi
+
+# 2. Dependencies
 log "Verifying dependencies..."
 DEPS=""
 command -v curl >/dev/null 2>&1 || DEPS="$DEPS curl"
@@ -34,36 +77,31 @@ command -v dpkg >/dev/null 2>&1 || DEPS="$DEPS dpkg"
 command -v rg >/dev/null 2>&1 || DEPS="$DEPS ripgrep"
 
 if [ -n "$DEPS" ]; then
-  log "Installing missing packages:$DEPS..."
   pkg update -y >/dev/null 2>&1 || true
-  pkg install -y $DEPS
+  pkg install -y $DEPS >/dev/null 2>&1 || pkg install -y $DEPS
 fi
 
 TMP_DIR="$PREFIX/tmp/opencode2-install"
 mkdir -p "$TMP_DIR"
 cd "$TMP_DIR"
 
-# Direct release package for OpenCode 2 (side-by-side binary opencode2)
 DEB_URL="https://github.com/guysoft/opencode-termux/releases/download/v1.0.2/opencode2_1.0.2_aarch64.deb"
-log "Downloading OpenCode v2.x deb package (app 2.0.0-android-termux)..."
+log "Downloading OpenCode v2.x deb package..."
 curl -fsSL -L "$DEB_URL" -o "opencode2_1.0.2_aarch64.deb"
 
 log "Installing package via dpkg..."
-dpkg -i --force-overwrite "opencode2_1.0.2_aarch64.deb" || apt-get install -f -y
+dpkg -i --force-overwrite "opencode2_1.0.2_aarch64.deb" >/dev/null 2>&1 || apt-get install -f -y >/dev/null 2>&1
 
-# Clean up temporary installer files
 rm -rf "$TMP_DIR"
 
 if command -v opencode2 >/dev/null 2>&1; then
-  ok "OpenCode v2.x installed successfully!"
+  ok "OpenCode v2.x installed and verified!"
   echo ""
   echo "--------------------------------------------------------"
   echo "Run OpenCode v2 with:"
   echo "  opencode2"
   echo ""
-  echo "Note: Installs side-by-side! 'opencode' runs v1, while 'opencode2' runs v2."
-  echo ""
-  echo "Version installed:"
+  echo "Installed version:"
   opencode2 --version 2>/dev/null || true
   echo "--------------------------------------------------------"
 else

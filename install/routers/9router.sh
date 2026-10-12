@@ -20,6 +20,52 @@ if [ ! -d "/data/data/com.termux/files/usr" ]; then
   exit 1
 fi
 
+ROUTER_HOME="$HOME/.9router"
+
+# 1. Existing Installation Detection (Repair / Delete / Exit)
+if command -v 9router >/dev/null 2>&1 || [ -d "$PREFIX/lib/node_modules/9router" ]; then
+  echo ""
+  warn "9router is already installed on this device!"
+  echo "Select an option:"
+  echo "  1) Repair / Reinstall"
+  echo "  2) Delete / Uninstall"
+  echo "  3) Exit"
+  echo ""
+
+  CHOICE=""
+  if [ -t 0 ]; then
+    read -rp "Enter choice [1-3] (default: 1): " CHOICE
+  elif [ -e /dev/tty ]; then
+    read -rp "Enter choice [1-3] (default: 1): " CHOICE < /dev/tty || CHOICE="1"
+  else
+    CHOICE="1"
+  fi
+  CHOICE="${CHOICE:-1}"
+
+  case "$CHOICE" in
+    1)
+      log "Proceeding with repair / update..."
+      ;;
+    2)
+      log "Uninstalling 9router..."
+      rm -f "$PREFIX/bin/9router"
+      npm uninstall -g 9router >/dev/null 2>&1 || true
+      rm -f "$ROUTER_HOME/termux-preload.js"
+      ok "9router has been completely removed."
+      exit 0
+      ;;
+    3)
+      log "Exiting without making changes."
+      exit 0
+      ;;
+    *)
+      warn "Invalid choice. Exiting."
+      exit 1
+      ;;
+  esac
+fi
+
+# 2. Dependencies
 log "Verifying dependencies..."
 DEPS=""
 command -v node >/dev/null 2>&1 || DEPS="$DEPS nodejs-lts"
@@ -28,7 +74,7 @@ command -v curl >/dev/null 2>&1 || DEPS="$DEPS curl"
 
 if [ -n "$DEPS" ]; then
   pkg update -y >/dev/null 2>&1 || true
-  pkg install -y $DEPS
+  pkg install -y $DEPS >/dev/null 2>&1 || pkg install -y $DEPS
 fi
 
 NPM_PREFIX="$(npm config get prefix)"
@@ -36,8 +82,6 @@ if [ "$NPM_PREFIX" != "$PREFIX" ]; then
   npm config set prefix "$PREFIX"
 fi
 
-# 1. Ensure persistent ~/.9router directory and valid machine-id
-ROUTER_HOME="$HOME/.9router"
 mkdir -p "$ROUTER_HOME"
 
 if [ ! -f "$ROUTER_HOME/machine-id" ]; then
@@ -50,9 +94,8 @@ if [ ! -f "$ROUTER_HOME/machine-id" ]; then
   chmod 600 "$ROUTER_HOME/machine-id" 2>/dev/null || true
 fi
 
-# 2. Deploy permanent Node.js runtime preload shim
-# This shim intercepts 'node-machine-id' at require-time so it never fails on Android.
-log "Installing runtime preload shim at $ROUTER_HOME/termux-preload.js..."
+# 3. Permanent Runtime Preload Shim
+log "Configuring runtime preload shim at $ROUTER_HOME/termux-preload.js..."
 cat <<'EOF' > "$ROUTER_HOME/termux-preload.js"
 const Module = require('module');
 const fs = require('fs');
@@ -89,8 +132,7 @@ Module._load = function(request, parent, isMain) {
 };
 EOF
 
-# 3. Clean-install 9router globally via npm
-# Suppress npm 11+ install-scripts warnings and noisy postinstall output
+# 4. Clean npm install with warning suppression
 log "Installing 9router globally via npm..."
 rm -f "$PREFIX/bin/9router"
 ALLOW_FLAG=""
@@ -99,9 +141,9 @@ if npm install --help 2>&1 | grep -q -- "--allow-scripts"; then
 fi
 npm install -g --omit=dev --no-audit --no-fund --loglevel=error $ALLOW_FLAG 9router >/dev/null 2>&1 || \
 npm install -g --omit=dev --no-audit --no-fund --loglevel=error 9router >/dev/null 2>&1 || \
-npm install -g --omit=dev --no-audit --no-fund 9router
+npm install -g --omit=dev --no-audit --no-fund 9router >/dev/null 2>&1
 
-# 4. Patch Bionic shebangs in global package
+# 5. Patch shebangs
 PKG_DIR="$PREFIX/lib/node_modules/9router"
 if command -v termux-fix-shebang >/dev/null 2>&1; then
   if [ -d "$PKG_DIR" ]; then
@@ -109,7 +151,7 @@ if command -v termux-fix-shebang >/dev/null 2>&1; then
   fi
 fi
 
-# 5. Create launcher wrapper (CRITICAL: unlink first so we do NOT clobber cli.js!)
+# 6. Configure launcher wrapper
 log "Configuring launcher wrapper at $PREFIX/bin/9router..."
 rm -f "$PREFIX/bin/9router"
 cat <<'EOF' > "$PREFIX/bin/9router"
@@ -131,7 +173,7 @@ EOF
 chmod 755 "$PREFIX/bin/9router"
 termux-fix-shebang "$PREFIX/bin/9router" 2>/dev/null || true
 
-# 6. Verification
+# 7. Verification
 if command -v 9router >/dev/null 2>&1; then
   ok "9router installed and verified!"
   echo ""
